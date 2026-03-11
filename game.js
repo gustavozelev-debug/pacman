@@ -41,17 +41,18 @@ const MAP = [
 
 // Visual Settings
 const COLORS = {
-    wall: '#34495e',
-    wallBorder: '#7f8c8d',
-    path: '#111',
+    wall: '#2c3e50',         // Buildings
+    wallBorder: '#1a252f',   // Building outline
+    path: '#444444',         // Asphalt
+    roadLines: '#f1c40f',    // Yellow stripes
     money: '#2ecc71',
     badge: '#3498db',
-    player: '#e67e22',
-    chaser: '#e74c3c',       // Red (Blinky)
-    strategic: '#ffb8ae',    // Pink (Pinky)
-    random: '#f1c40f',       // Orange (Clyde)
-    panic: '#3498db',        // Blue state
-    panicFlash: '#ecf0f1'    // White state (ending soon)
+    player: '#f1c40f',
+    chaser: '#e74c3c',
+    strategic: '#ffb8ae',
+    random: '#e67e22',
+    panic: '#3498db',
+    panicFlash: '#ecf0f1'
 };
 
 let mapGrid = [];
@@ -62,6 +63,26 @@ let gameWon = false;
 let animationId;
 let panicModeTimer = 0;
 let totalMoney = 0; // For win condition
+
+// Load Sprites
+const spritePlayer = new Image();
+spritePlayer.src = 'robber.png';
+
+const spritePolice = new Image();
+spritePolice.src = 'police_car.png';
+
+let imagesLoaded = 0;
+const totalImages = 2;
+function checkImagesLoaded() {
+    imagesLoaded++;
+    if (imagesLoaded === totalImages) {
+        initMap();
+        initEntities();
+        requestAnimationFrame(gameLoop);
+    }
+}
+spritePlayer.onload = checkImagesLoaded;
+spritePolice.onload = checkImagesLoaded;
 
 // DOM Elements
 const scoreElement = document.getElementById('score');
@@ -109,6 +130,15 @@ class Entity {
         ctx.beginPath();
         ctx.arc(this.x + TILE_SIZE/2, this.y + TILE_SIZE/2, this.radius, 0, Math.PI * 2);
         ctx.fill();
+    }
+    
+    // Helper to draw an image centered with a given rotation
+    drawImageRotated(img, x, y, width, height, angle) {
+        ctx.save();
+        ctx.translate(x + width/2, y + height/2);
+        ctx.rotate(angle);
+        ctx.drawImage(img, -width/2, -height/2, width, height);
+        ctx.restore();
     }
     
     canMove(dx, dy) {
@@ -170,6 +200,18 @@ class Player extends Entity {
         if (this.x > canvas.width) this.x = -TILE_SIZE/2;
 
         this.handleCollisions();
+    }
+
+    draw() {
+        // Determine rotation based on direction
+        let angle = 0;
+        if (this.vx > 0) angle = Math.PI / 2;      // Right
+        else if (this.vx < 0) angle = -Math.PI / 2; // Left
+        else if (this.vy > 0) angle = Math.PI;     // Down
+        else angle = 0;                            // Up (default)
+        
+        // Draw the robber sprite
+        this.drawImageRotated(spritePlayer, this.x, this.y, TILE_SIZE, TILE_SIZE, angle);
     }
 
     handleCollisions() {
@@ -301,12 +343,28 @@ class Enemy extends Entity {
     }
 
     draw() {
+        // Colored circle behind the sprite to distinguish ghost types or panic mode
         if(this.state === 'panic') {
             this.color = (panicModeTimer < 2000 && Math.floor(Date.now() / 200) % 2 === 0) ? COLORS.panicFlash : COLORS.panic;
         } else {
             this.color = this.baseColor;
         }
-        super.draw();
+
+        ctx.fillStyle = this.color;
+        ctx.globalAlpha = 0.5;
+        ctx.beginPath();
+        ctx.arc(this.x + TILE_SIZE/2, this.y + TILE_SIZE/2, this.radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1.0;
+
+        // Determine rotation based on AI direction
+        let angle = 0;
+        if (this.dirX > 0) angle = Math.PI / 2;
+        else if (this.dirX < 0) angle = -Math.PI / 2;
+        else if (this.dirY > 0) angle = Math.PI;
+        
+        // Draw the police car sprite
+        this.drawImageRotated(spritePolice, this.x, this.y, TILE_SIZE, TILE_SIZE, angle);
     }
 }
 
@@ -343,23 +401,36 @@ function drawMap() {
             let y = r * TILE_SIZE;
 
             if (tile === 1) {
-                // Wall
+                // Buildings
                 ctx.fillStyle = COLORS.wallBorder;
                 ctx.fillRect(x, y, TILE_SIZE, TILE_SIZE);
                 ctx.fillStyle = COLORS.wall;
                 ctx.fillRect(x + 2, y + 2, TILE_SIZE - 4, TILE_SIZE - 4);
-            } else if (tile === 2) {
-                // Money Bag (small circle)
-                ctx.fillStyle = COLORS.money;
-                ctx.beginPath();
-                ctx.arc(x + TILE_SIZE/2, y + TILE_SIZE/2, 4, 0, Math.PI * 2);
-                ctx.fill();
+                
+                // Add tiny windows to make it building-like
+                ctx.fillStyle = COLORS.wallBorder;
+                ctx.fillRect(x + 4, y + 4, 4, 4);
+                ctx.fillRect(x + 12, y + 4, 4, 4);
+                ctx.fillRect(x + 4, y + 12, 4, 4);
+                ctx.fillRect(x + 12, y + 12, 4, 4);
+            } else {
+                // Asphalt path
+                ctx.fillStyle = COLORS.path;
+                ctx.fillRect(x, y, TILE_SIZE, TILE_SIZE);
+            }
+
+            if (tile === 2) {
+                // Money Bag Emoji - rendered smaller
+                ctx.font = '12px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText('💰', x + TILE_SIZE/2, y + TILE_SIZE/2);
             } else if (tile === 3) {
-                // Badge (large circle or rectangle)
-                ctx.fillStyle = COLORS.badge;
-                ctx.beginPath();
-                ctx.arc(x + TILE_SIZE/2, y + TILE_SIZE/2, 8, 0, Math.PI * 2);
-                ctx.fill();
+                // Badge Emoji
+                ctx.font = '16px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText('🛡️', x + TILE_SIZE/2, y + TILE_SIZE/2);
             }
         }
     }
@@ -479,7 +550,4 @@ function gameLoop(timestamp) {
     }
 }
 
-// Start
-initMap();
-initEntities();
-requestAnimationFrame(gameLoop);
+// Start is now handled by checkImagesLoaded()
