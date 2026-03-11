@@ -1,0 +1,86 @@
+:root {
+    --bg-color: #1a1a1a;
+    --text-color: #f1c40f;
+    --canvas-bg: #2c3e50;
+    --ui-bg: rgba(0, 0, 0, 0.8);
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    background-color: var(--bg-color);
+    color: var(--text-color);
+    font-family: 'Press Start 2P', cursive;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    overflow: hidden;
+}
+
+#game-container {
+    position: relative;
+    box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+    background-color: var(--canvas-bg);
+    border: 4px solid #34495e;
+    border-radius: 8px;
+    padding: 10px;
+}
+
+header {
+    display: flex;
+    justify-content: space-between;
+    padding: 10px 0 20px 0;
+    font-size: 14px;
+    text-shadow: 2px 2px 0px #000;
+}
+
+canvas {
+    display: block;
+    background-color: #111;
+    image-rendering: pixelated; /* crispy pixels */
+}
+
+#message-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: var(--ui-bg);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    z-index: 10;
+}
+
+#message-overlay.hidden {
+    display: none;
+}
+
+#message-text {
+    font-size: 24px;
+    margin-bottom: 20px;
+    color: #e74c3c; /* Game Over Default */
+    text-shadow: 2px 2px 0px #000;
+}
+
+#message-text.win {
+    color: #2ecc71; /* Win Color */
+}
+
+#message-overlay p {
+    font-size: 10px;
+    color: #bdc3c7;
+    animation: blink 1s infinite step-end;
+}
+
+@keyframes blink {
+    50% { opacity: 0; }
+}
