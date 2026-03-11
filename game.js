@@ -56,36 +56,18 @@ const COLORS = {
 };
 
 let mapGrid = [];
-let score = 0;
+let arrests = 0;
 let lives = 3;
 let gameOver = false;
 let gameWon = false;
 let animationId;
-let panicModeTimer = 0;
-let totalMoney = 0; // For win condition
-
-// Load Sprites
-const spritePlayer = new Image();
-spritePlayer.src = 'robber.png';
-
-const spritePolice = new Image();
-spritePolice.src = 'police_car.png';
-
-let imagesLoaded = 0;
-const totalImages = 2;
-function checkImagesLoaded() {
-    imagesLoaded++;
-    if (imagesLoaded === totalImages) {
-        initMap();
-        initEntities();
-        requestAnimationFrame(gameLoop);
-    }
-}
-spritePlayer.onload = checkImagesLoaded;
-spritePolice.onload = checkImagesLoaded;
+let armedModeTimer = 0;
+let totalMoney = 0; 
+let stolenMoney = 0;
 
 // DOM Elements
-const scoreElement = document.getElementById('score');
+const arrestsElement = document.getElementById('arrests');
+const stolenElement = document.getElementById('stolen');
 const livesElement = document.getElementById('lives');
 const messageOverlay = document.getElementById('message-overlay');
 const messageText = document.getElementById('message-text');
@@ -125,20 +107,18 @@ class Entity {
         this.radius = TILE_SIZE / 2 * 0.8;
     }
 
-    draw() {
-        ctx.fillStyle = this.color;
-        ctx.beginPath();
-        ctx.arc(this.x + TILE_SIZE/2, this.y + TILE_SIZE/2, this.radius, 0, Math.PI * 2);
-        ctx.fill();
-    }
-    
-    // Helper to draw an image centered with a given rotation
-    drawImageRotated(img, x, y, width, height, angle) {
-        ctx.save();
-        ctx.translate(x + width/2, y + height/2);
-        ctx.rotate(angle);
-        ctx.drawImage(img, -width/2, -height/2, width, height);
-        ctx.restore();
+    draw(icon = '') {
+        if (icon) {
+            ctx.font = `${this.radius * 2 * 1.2}px sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(icon, this.x + TILE_SIZE/2, this.y + TILE_SIZE/2);
+        } else {
+            ctx.fillStyle = this.color;
+            ctx.beginPath();
+            ctx.arc(this.x + TILE_SIZE/2, this.y + TILE_SIZE/2, this.radius, 0, Math.PI * 2);
+            ctx.fill();
+        }
     }
     
     canMove(dx, dy) {
@@ -203,41 +183,11 @@ class Player extends Entity {
     }
 
     draw() {
-        // Determine rotation based on direction
-        let angle = 0;
-        if (this.vx > 0) angle = Math.PI / 2;      // Right
-        else if (this.vx < 0) angle = -Math.PI / 2; // Left
-        else if (this.vy > 0) angle = Math.PI;     // Down
-        else angle = 0;                            // Up (default)
-        
-        // Draw the robber sprite
-        this.drawImageRotated(spritePlayer, this.x, this.y, TILE_SIZE, TILE_SIZE, angle);
+        super.draw('🚓'); // Player is now the Police!
     }
 
     handleCollisions() {
-        // Keep synced with grid mostly
-        let gridC = Math.round(this.x / TILE_SIZE);
-        let gridR = Math.round(this.y / TILE_SIZE);
-        
-        if (gridC >= 0 && gridC < COLS && gridR >= 0 && gridR < ROWS) {
-            let tile = mapGrid[gridR][gridC];
-            
-            // Collect Money (2)
-            if (tile === 2) {
-                mapGrid[gridR][gridC] = 0;
-                score += 10;
-                totalMoney--;
-                scoreElement.innerText = score;
-                checkWinCondition();
-            }
-            // Collect Badge (3)
-            else if (tile === 3) {
-                mapGrid[gridR][gridC] = 0;
-                score += 50;
-                scoreElement.innerText = score;
-                triggerPanicMode();
-            }
-        }
+        // Player (Police) no longer interacts with dots, only with Robbers
     }
 }
 
@@ -247,7 +197,7 @@ class Enemy extends Entity {
         super(r, c, color);
         this.baseColor = color;
         this.type = type; // 'chaser', 'strategic', 'random'
-        this.state = 'chase'; // chase, scatter, panic, base
+        this.state = 'rob'; // rob, armed, base, arrested
         this.speed = 1.5; // Slightly slower than player
         this.dirX = 0;
         this.dirY = -1; // Start by trying to move up out of the house
@@ -272,20 +222,26 @@ class Enemy extends Entity {
             let targetC = player.c;
             let targetR = player.r;
 
-            if (this.state === 'panic') {
-                // Try to go to a fixed corner depending on ghost type, or just opposite
-                targetC = COLS - 1 - player.c;
-                targetR = ROWS - 1 - player.r;
+            if (this.state === 'armed') {
+                // If armed, aggressively target the police
+                targetC = player.c;
+                targetR = player.r;
             } else if (this.type === 'strategic') {
-                // Target 4 tiles ahead of player
                 targetC = player.c + (player.vx * 4);
                 targetR = player.r + (player.vy * 4);
             } else if (this.type === 'random') {
-                // If close, scatter. If far, chase.
+                // Ignore player, just pick a corner
                 let dist = Math.hypot(player.c - this.c, player.r - this.r);
                 if (dist < 8) {
-                    targetC = 0; // go to bottom left corner
+                    targetC = 0; 
                     targetR = ROWS - 1; 
+                }
+            } else {
+                // Chaser doesn't chase player but runs away if close!
+                let dist = Math.hypot(player.c - this.c, player.r - this.r);
+                if (dist < 5) {
+                    targetC = COLS - 1 - player.c;
+                    targetR = ROWS - 1 - player.r;
                 }
             }
 
@@ -340,12 +296,41 @@ class Enemy extends Entity {
         this.y += this.dirY * this.speed;
 
         // Visual handling (colors handled in draw)
+        this.handleGridCollisions();
+    }
+
+    handleGridCollisions() {
+        if (this.state === 'base' || this.state === 'arrested') return;
+        
+        let gridC = Math.round(this.x / TILE_SIZE);
+        let gridR = Math.round(this.y / TILE_SIZE);
+        
+        if (gridC >= 0 && gridC < COLS && gridR >= 0 && gridR < ROWS) {
+            let tile = mapGrid[gridR][gridC];
+            
+            // Robber Steals Money (2)
+            if (tile === 2) {
+                mapGrid[gridR][gridC] = 0;
+                stolenMoney += 10;
+                stolenElement.innerText = stolenMoney;
+            }
+            // Robber Collects Weapon (3)
+            else if (tile === 3) {
+                mapGrid[gridR][gridC] = 0;
+                triggerArmedMode();
+            }
+        }
     }
 
     draw() {
+        if (this.state === 'arrested') return; // Don't draw if in jail
+        
+        let icon = '🥷'; // Enemies are now the Robbers!
+        
         // Colored circle behind the sprite to distinguish ghost types or panic mode
-        if(this.state === 'panic') {
-            this.color = (panicModeTimer < 2000 && Math.floor(Date.now() / 200) % 2 === 0) ? COLORS.panicFlash : COLORS.panic;
+        if (this.state === 'armed') {
+            this.color = (armedModeTimer < 2000 && Math.floor(Date.now() / 200) % 2 === 0) ? COLORS.panicFlash : COLORS.panic;
+            icon = (armedModeTimer < 2000 && Math.floor(Date.now() / 200) % 2 === 0) ? '🔫' : '👿';
         } else {
             this.color = this.baseColor;
         }
@@ -357,14 +342,7 @@ class Enemy extends Entity {
         ctx.fill();
         ctx.globalAlpha = 1.0;
 
-        // Determine rotation based on AI direction
-        let angle = 0;
-        if (this.dirX > 0) angle = Math.PI / 2;
-        else if (this.dirX < 0) angle = -Math.PI / 2;
-        else if (this.dirY > 0) angle = Math.PI;
-        
-        // Draw the police car sprite
-        this.drawImageRotated(spritePolice, this.x, this.y, TILE_SIZE, TILE_SIZE, angle);
+        super.draw(icon);
     }
 }
 
@@ -391,6 +369,7 @@ function initEntities() {
     enemies.push(new Enemy(11, 13, COLORS.chaser, 'chaser'));
     enemies.push(new Enemy(13, 11, COLORS.strategic, 'strategic'));
     enemies.push(new Enemy(13, 15, COLORS.random, 'random'));
+    enemies.push(new Enemy(15, 13, COLORS.random, 'random')); // 4th robber
 }
 
 function drawMap() {
@@ -436,42 +415,33 @@ function drawMap() {
     }
 }
 
-function triggerPanicMode() {
-    panicModeTimer = 8000; // 8 seconds
+function triggerArmedMode() {
+    armedModeTimer = 8000; // 8 seconds
     enemies.forEach(e => {
-        if(e.state !== 'base') e.state = 'panic';
-        // reverse direction
-        e.vx *= -1;
-        e.vy *= -1;
+        if(e.state !== 'base' && e.state !== 'arrested') e.state = 'armed';
     });
 }
 
-function checkWinCondition() {
-    if (totalMoney <= 0) {
-        gameWon = true;
-        gameOver = true;
-        endGame(true);
-    }
-}
-
-function endGame(win) {
+function endGame(win, msg) {
     messageOverlay.classList.remove('hidden');
+    messageText.innerText = msg;
     if (win) {
-        messageText.innerText = 'CARGA RECUPERADA!';
         messageText.className = 'win';
     } else {
-        messageText.innerText = 'GAME OVER';
         messageText.className = '';
     }
 }
 
 function resetGame() {
-    score = 0;
+    arrests = 0;
+    stolenMoney = 0;
     lives = 3;
-    scoreElement.innerText = score;
+    arrestsElement.innerText = arrests;
+    stolenElement.innerText = stolenMoney;
     livesElement.innerText = lives;
     gameOver = false;
     gameWon = false;
+    armedModeTimer = 0;
     messageOverlay.classList.add('hidden');
     initMap();
     initEntities();
@@ -483,33 +453,39 @@ function resetGame() {
 function handleEntityCollisions() {
     for (let i = 0; i < enemies.length; i++) {
         let e = enemies[i];
+        if (e.state === 'arrested') continue; // Ignore if already in jail
         
         let dist = Math.hypot(player.x - e.x, player.y - e.y);
         
         // Simple circle collision
         if (dist < player.radius + e.radius) {
-            if (e.state === 'panic') {
-                // Eat ghost
-                score += 200;
-                scoreElement.innerText = score;
-                // Send back to house
-                e.x = 13 * TILE_SIZE;
-                e.y = 13 * TILE_SIZE;
-                e.c = 13;
-                e.r = 13;
-                e.state = 'chase';
-            } else if (e.state !== 'base') {
-                // Ghost eats player
+            if (e.state === 'armed') {
+                // Armed Robber defeats Police!
                 lives--;
                 livesElement.innerText = lives;
                 if (lives <= 0) {
                     gameOver = true;
-                    endGame(false);
+                    endGame(false, 'VIATURA DESTRUÍDA!');
                 } else {
                     // Reset positions
                     initEntities();
                 }
                 break; // Stop checking further collisions this frame
+            } else if (e.state !== 'base') {
+                // Police Arrests Robber!
+                arrests++;
+                arrestsElement.innerText = arrests;
+                
+                // Send to jail
+                e.state = 'arrested';
+                e.x = 13 * TILE_SIZE;
+                e.y = 13 * TILE_SIZE;
+                
+                if (arrests >= 4) { // All 4 robbers caught
+                    gameOver = true;
+                    gameWon = true;
+                    endGame(true, 'TODOS PRESOS!');
+                }
             }
         }
     }
@@ -523,10 +499,10 @@ function gameLoop(timestamp) {
     let dt = timestamp - lastTime;
     lastTime = timestamp;
 
-    if (panicModeTimer > 0) {
-        panicModeTimer -= dt;
-        if (panicModeTimer <= 0) {
-            enemies.forEach(e => { if(e.state === 'panic') e.state = 'chase'; });
+    if (armedModeTimer > 0) {
+        armedModeTimer -= dt;
+        if (armedModeTimer <= 0) {
+            enemies.forEach(e => { if(e.state === 'armed') e.state = 'rob'; });
         }
     }
 
@@ -550,4 +526,7 @@ function gameLoop(timestamp) {
     }
 }
 
-// Start is now handled by checkImagesLoaded()
+// Start
+initMap();
+initEntities();
+requestAnimationFrame(gameLoop);
